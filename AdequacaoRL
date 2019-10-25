@@ -1,0 +1,42 @@
+### ADEQUAÇÃO AMBIENTAL RL ####
+
+### tabela com áreas de vegetação 2017 GP e PP, 2008PP e 20% GP por municipio
+##### funcao para calcular passivos e ativos dentro das propriedades privadas ###
+
+RL_passivo<-function(x){
+  x$vegHa<-(x$X3+x$X4+x$X5+x$X12)*900/10000
+  x$propMF<-as.factor(x$areaMF < 4)
+  levels(x$propMF)<- c(">4MF","<4MF")  
+  
+  vegHa_mun<-with(x, aggregate(cbind(areaHa,vegHa), by = list(propMF,cd_mun), FUN = sum))
+  vegHa_mun[,5:6]<-NA
+  vegHa_mun[seq(1,nrow(vegHa_mun)-1,2),5:6]<-vegHa_mun[seq(2,nrow(vegHa_mun),2),3:4]
+  vegHa_mun<-na.omit(vegHa_mun)
+  colnames(vegHa_mun)<-c("tamanho_Prop","cod_Mun","areaTotalG_ha","areaVegG_ha","areaTotalP_ha","areaVegP_ha")
+  vegHa_mun$nome_Mun<-tab_muncaat$mun_nome[match(vegHa_mun$cod_Mun,tab_muncaat$mun_codigo)]
+  vegHa_mun$UF<-tab_muncaat$estado[match(vegHa_mun$cod_Mun,tab_muncaat$mun_codigo)]
+  vegHa_mun<-vegHa_mun[,c(2,7,8,3:6)]
+  vegHa_mun$RL20G_ha<-(vegHa_mun$areaTotalG_ha*0.2)
+  vegHa_mun$passivoG_ha<-vegHa_mun$areaVegG_ha-(vegHa_mun$RL20G_ha)
+  vegHa_mun$balancoRL_ha<-vegHa_mun$areaVegP_ha + vegHa_mun$passivoG_ha
+  return(vegHa_mun)
+}
+
+read.table("PL_caat.txt",head=T)# PL_caat foi feito no script "RL.r"
+read.table("PL_caat_2008.txt",head=T)# PL_caat_2008 foi feito no script "RL.r"
+
+RL_passivo_caat<-RL_passivo(PL_caat) 
+RL_passivo_caat_2008<-RL_passivo(PL_caat_2008) 
+
+# adicionar vegetacao em 2008 na tabela RL_passivo caat
+RL_passivo_caat$areaVegP_2008<-RL_passivo_caat_2008$areaVegP_ha[RL_passivo_caat$cod_Mun%in%RL_passivo_caat$cod_Mun]
+write.table(RL_passivo_caat,"RL_final.txt") # tabela com áreas de vegetação em 2017, 2008 e 20% de GP, para calculo do balanco de RL por municipio
+
+## escrever shapefile com a tabela de dados completa ##
+writeOGR(municipios_caat,dsn=getwd(),layer = "balancoRL_MunCaat", driver="ESRI Shapefile",overwrite=T)
+
+### tabela por estado 
+unique(RL_passivo_caat$UF)
+passivo_estados<-with(RL_passivo_caat, aggregate(cbind(RL20G_ha,passivoG_ha,areaVegP_ha,balancoRL_ha), by = list(UF), FUN = sum))
+colnames(passivo_estados)<-c("UF","VegNat20%_GrdProp","Passivo_GrdProp","Ativo_PeqProp","Balanço_RL")
+write.table(passivo_estados,"Balanço_RL_estados.txt")
