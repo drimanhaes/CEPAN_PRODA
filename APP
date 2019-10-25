@@ -1,0 +1,80 @@
+### PACOTES
+library(maptools)
+library(sp)
+library(rgdal)
+library(raster)
+library(GISTools)
+library(rgeos)
+library(geosphere)
+
+### ÁREAS DE PRESERVAÇÃO PERMANENTE ####
+# shapefile com os municipios-alvo
+municipios_caat<-readOGR("D:/Adriana/Documents/Consultorias/CEPAN/Uso_solo_2017/1Arquivos/municipios_caat.shp")
+crs(municipios_caat)<-"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+# carregar os shapefiles de APP derivados do QGis (onde foi feito o buffer dos corpos hidricos)
+# HÍDRICAS
+app_cursodagua<-readOGR("D:/Adriana/OneDrive/Diagnostico fisico/APP/app_cursodagua_Caatinga.shp")
+crs(app_cursodagua)<-"+proj=utm +zone=24 +south +ellps=GRS80 +units=m +no_defs"
+app_cursodagua <- gBuffer(app_cursodagua, byid=TRUE, width=0)# retira shapes invalidos
+crs(app_cursodagua)<-"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0 "
+app_cursodagua_menor10m<-readOGR("D:/Adriana/OneDrive/Diagnostico fisico/APP/app_cursodagua_menor10m.shp")
+
+app_lagoslagoas<-readOGR("D:/Adriana/OneDrive/Diagnostico fisico/APP/app_lagoslagoas_Caatinga2.shp")
+crs(app_lagoslagoas)<-"+proj=utm +zone=24 +south +ellps=GRS80 +units=m +no_defs"
+app_lagoslagoas <- gBuffer(app_lagoslagoas, byid=TRUE, width=0)
+crs(app_lagoslagoas)<-"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0 "
+
+app_reservatorios<-readOGR("D:/Adriana/OneDrive/Diagnostico fisico/APP/app_reservatorios_Caatinga.shp")
+
+#NÃO-HÍDRICAS
+app_altitude<-readOGR("D:/Adriana/OneDrive/Diagnostico fisico/APP/app_1800_Caatinga_latlong.shp")
+app_declividade<-readOGR("D:/Adriana/OneDrive/Diagnostico fisico/APP/app_declividade_latlong.shp")
+
+
+# área total de APP e vegetaçao de APP por municipio
+#municipios_app<-read.table("D:/Adriana/Documents/Consultorias/CEPAN/Banco de dados/Analises_R/municipios_app_veg2.txt",head=T)
+
+municipios_app<-data.frame(mun_cod<-municipios_caat$CD_GEOCMU,
+                           municipio = municipios_caat$municipio,
+                           estado = municipios_caat$estado,
+                           cursodagua = NA,
+                           cursodagua_menor10m = NA,
+                           lagoslagoas = NA,
+                           reservatorios = NA,
+                           altitude = NA,
+                           declividade = NA)
+
+# fazer um loop para cada categoria de APP
+### carregar função polygonizer (script R "função_Poligonizer.r") para transformar o raster em poligono e calcular a área por classes de uso
+
+for(i in mun_cod[1:length(municipios_app$mun_cod)]){
+  mun_shp_loop<-municipios_caat[municipios_caat$CD_GEOCMU==i,]
+  mun.crop <- gIntersection(app_reservatorios,mun_shp_loop,byid = TRUE, drop_lower_td = TRUE)
+  
+  if(is(mun.crop)[1]=="NULL") {
+    municipios_app[which(i==mun_cod),"veg_reservatorios"]<-0 ## fazer para cada categoria de APP
+    next
+  }
+  
+  mun.crop2 <- crop(Mapa_final_APP, extent(mun.crop), snap="out")
+  crop1 <- setValues(mun.crop2, NA)
+  mun.r <- rasterize(mun.crop, crop1) 
+  mun_rst <- mask(x=mun.crop2, mask=mun.r)
+  shp_app<-polygonizer(mun_rst,pypath=NULL,  readpoly=T, aggregate=T)
+  
+  a<-sum(shp_app@data$AREA_HA[shp_app@data$DN%in% c("3","4","5","12")])
+  municipios_app[which(i==mun_cod),"veg_reservatorios"]<-a ## fazer para cada categoria de APP
+  b<-sum(shp_app@data$AREA_HA)
+  municipios_app[which(i==mun_cod),"reservatorios"]<-b ## fazer para cada categoria de APP
+
+  write.table(municipios_app,"municipios_app_completa.txt")
+  cat(paste(which(i==mun_cod),"\n"))
+}  
+
+
+write.table(municipios_app,"municipios_app.txt")
+
+## por estado
+app_estados<-with(municipios_app, aggregate(cbind(municipios_app[,4:10]), by = list(estado), FUN = sum))
+write.table(app_estados,"app_estados.txt")
