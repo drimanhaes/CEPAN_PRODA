@@ -1,0 +1,113 @@
+### PACOTES
+library(rgdal)
+library(raster)
+library(GISTools)
+library(rgeos)
+library(geosphere)
+
+### CARREGAR MAPBIOMAS ####
+MapBio_Caat2017_v3<-raster("MB_uso_2017_muncaat.tif")
+
+### INCORPORAR CLASSES HIDRICAS (ANA) ####
+corposhidricos_ANA16<-readOGR("corpos_hidricos_app_3 classes.shp")
+
+unique(corposhidricos_ANA16$tipomda_3)
+unique(corposhidricos_ANA16$nm_gener_2)
+unique(corposhidricos_ANA16$detipoma_2)
+
+corposhidricos_ANA16$classe_app<-NA
+
+# cursos d´agua
+corposhidricos_ANA16$classe_app[corposhidricos_ANA16$tipomda=="Rio" |
+   is.na(corposhidricos_ANA16$tipomda) & corposhidricos_ANA16$nm_generic 
+  %in% c("Riacho","Córrego","Rio")]<-"Curso_dagua"
+
+# lagos e lagoas naturais
+corposhidricos_ANA16$classe_app[corposhidricos_ANA16$tipomda_2 %in% c("Laguna","Lago/Lagoa") |
+  is.na(corposhidricos_ANA16$tipomda_2) & corposhidricos_ANA16$nm_gener_1 
+  %in% c("Alagadiço","Baía","Baixão","Ipueira","Lagamar","Lago","Várzea") |
+  is.na(corposhidricos_ANA16$tipomda_2) & corposhidricos_ANA16$nm_gener_1 
+  %in% c("Açude","Barragem","Represa","Lagoa") & corposhidricos_ANA16$detipoma_1  
+  %in% "Natural"] <-"Lagoas_naturais"
+
+# reservatorios artificiais
+corposhidricos_ANA16$classe_app[corposhidricos_ANA16$tipomda_3 %in% "Represa/Açude" |
+  is.na(corposhidricos_ANA16$tipomda_3) & corposhidricos_ANA16$nm_gener_2 
+  %in% c("CGH","PCH","UHE") |is.na(corposhidricos_ANA16$tipomda_3) & corposhidricos_ANA16$nm_gener_2
+  %in% c("Açude","Barragem","Represa","Lagoa") & corposhidricos_ANA16$detipoma_2  
+  %in% "Artificial"] <-"Reservatorios_artificiais"
+
+corposhidricos_ANA16<-corposhidricos_ANA16[!is.na(corposhidricos_ANA16$classe_app),]
+
+corposhidricos_ANA16$classe_num<-NA
+corposhidricos_ANA16$classe_num[corposhidricos_ANA16$classe_app=="Rio"]<-1
+corposhidricos_ANA16$classe_num[corposhidricos_ANA16$classe_app=="Lagoas_naturais"]<-2
+corposhidricos_ANA16$classe_num[corposhidricos_ANA16$classe_app=="Reservatorios_artificiais"]<-3
+
+# loop para reclassificar por município 
+
+municipios_caat<-readOGR("municipios_caat.shp")
+crs(municipios_caat)<-"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+mun_cod<-municipios_caat$CD_GEOCMU
+
+for(i in mun_cod[8:length(mun_cod)]){
+  if(!file.exists(paste("D:/Adriana/Documents/Consultorias/CEPAN/Banco de dados/rasters/",i,"/mun_",i,"_novo.asc",sep=""))) next
+  mun_rst<-raster(paste("D:/Adriana/Documents/Consultorias/CEPAN/Banco de dados/rasters/",i,"/mun_",i,"_novo.asc",sep=""))
+  
+  CH.mun<-crop(corposhidricos_ANA16, extent(mun_rst))
+  
+  CH.rst <- rasterize(corposhidricos_ANA16, mun_rst,field = corposhidricos_ANA16$classe_num)
+  CH.rst[is.na(mun_rst[])| mun_rst[]==0]<-NA
+  
+  mun_rst2<-mun_rst
+  
+  mun_rst2[mun_rst[] & CH.rst[]==1]<-31 #Rio
+  mun_rst2[mun_rst[] & CH.rst[]==2]<-32 #lagoas naturais
+  mun_rst2[mun_rst[] & CH.rst[]==3]<-33 #Reservatorios artificiais
+  
+  dir.create(paste("D:/Adriana/OneDrive/Uso_solo_final/",i,sep=""))
+  writeRaster(mun_rst2, filename = paste("D:/Adriana/OneDrive/Uso_solo_final/",i,"/mun_",i,"_usoFinal.asc",sep=""), overwrite = T)
+  cat(paste(which(mun_cod==i),"\n"))
+}
+
+# mosaico dos municipios para formar o bioma novamente # foi feito este desmembramento devido falta de memória para processamento
+mun_cod2<-list.files("D:/Adriana/OneDrive/Uso_solo_final/")
+
+for(i in mun_cod2[1:length(mun_cod2)]){
+  if(!file.exists(paste("D:/Adriana/OneDrive/Uso_solo_final",i,paste("mun_",i,"_usoFinal.asc",sep=""),sep="/"))) next
+  mun_rst<-raster(paste("D:/Adriana/OneDrive/Uso_solo_final",i,paste("mun_",i,"_usoFinal.asc",sep=""),sep="/"))
+  cells<-which(mun_rst[]%in% c(30:33))
+  xy<-xyFromCell(mun_rst,cells)
+  cells2<-as.integer(cellFromXY(MapBio_Caat2017_v3,xy))
+  MapBio_Caat2016V2.3[cells2]<-mun_rst[cells]
+  cat(paste(which(mun_cod2==i),"\n"))
+}
+
+writeRaster(MapBio_Caat2017_v3, file = "D:/Adriana/OneDrive/Uso_solo_final/Mapa_final_APP.asc", overwrite=T)
+
+
+### CÁLCULO DE ÁREA DAS CLASSES DO MAPA DE USO ####
+Mapa_final_APP<-raster("Mapa_roam3.tif")
+
+UsoRoam_mun<-data.frame(cd_mun = municipios_caat$CD_GEOCMU,
+                        nm_mun = municipios_caat$municipio,
+                        UF = municipios_caat$estado,
+                        area_mun = NA)
+
+UsoRoam_mun<-data.frame(UsoRoam_mun,matrix(0,nr = nrow(UsoRoam_mun), nc = 22))
+colnames(UsoRoam_mun)<-c(colnames(UsoRoam_mun)[1:4],c(0,3,4,5,9,12,15,19,20,21,23,24,25,27,29,30,31,32,33,40,41,42))
+
+# por municipio
+for(i in UsoRoam_mun$cd_mun[1:length(UsoRoam_mun$cd_mun)][!UsoRoam_mun$cd_mun[1:length(UsoRoam_mun$cd_mun)] %in% municipios_caat$cd_mun]){
+  cat(paste(which(i==UsoRoam_mun$cd_mun),i,"/n"))
+  mun_rst<-raster(paste("D:/Adriana/OneDrive/Uso_solo_final/",i,"/mun_",i,"_usoFinal.asc",sep=""))
+  b<-mun_rst[]!=0
+  b[is.na(b)]<-FALSE
+  UsoRoam_mun$area_mun[UsoRoam_mun$cd_mun == i]<- sum(b)*900/10000
+  a<-table(mun_rst[])*900/10000
+  UsoRoam_mun[which(UsoRoam_mun$cd_mun==i),names(a)]<-a
+  
+}
+
+## por estado
+UsoRoam_estados<-with(UsoRoam_mun, aggregate(cbind(UsoRoam_mun[,5:26]), by = list(UF), FUN = sum))
