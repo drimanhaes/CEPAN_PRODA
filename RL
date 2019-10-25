@@ -1,0 +1,165 @@
+### PACOTES
+library(maptools)
+library(sp)
+library(rgdal)
+library(raster)
+library(GISTools)
+library(rgeos)
+library(geosphere)
+library(foreign)
+library(data.table)
+
+### RESERVAS LEGAIS ####
+## carregar shapefile dos municipios e tabela de MFs do SNCR 
+municipios_caat<-readOGR("municipios_caat.shp")
+crs(municipios_caat)<-"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+MF_muncaat<-read.table("D:/Adriana/Documents/Consultorias/CEPAN/Banco de dados/Dados_SIG/Malha_Fundiaria/MF_municipios.txt",
+                       head=T,dec=",",sep="\t" , quote = "", row.names = NULL,  stringsAsFactors = FALSE)
+
+tab_muncaat<-MF_muncaat[MF_muncaat$mun_codigo %in% municipios_caat$CD_GEOCMU,]
+write.table(tab_muncaat,"tab_muncaat.txt")
+
+##  carregar rasters da malha fundiaria por estado (dados do IMAFLORA) ####
+MA_rst<-raster("a2_LOt_21_v170321.tif")
+MA_rst_dbf<-read.dbf("a2_LOt_21_v170321.tif.vat.dbf")
+colnames(MA_rst_dbf)[1] <- "ID"
+levels(MA_rst)[[1]] <- MA_rst_dbf
+
+PI_rst<-raster("a2_LOt_22_v170321.tif")
+PI_rst_dbf<-read.dbf("a2_LOt_22_v170321.tif.vat.dbf")
+colnames(PI_rst_dbf)[1] <- "ID"
+levels(PI_rst)[[1]] <- PI_rst_dbf
+
+CE_rst<-raster("a2_LOt_23_v170321.tif")
+CE_rst_dbf<-read.dbf("a2_LOt_23_v170321.tif.vat.dbf")
+colnames(CE_rst_dbf)[1] <- "ID"
+levels(CE_rst)[[1]] <- CE_rst_dbf
+
+RN_rst<-raster("a2_LOt_24_v170321.tif")
+RN_rst_dbf<-read.dbf("a2_LOt_24_v170321.tif.vat.dbf")
+colnames(RN_rst_dbf)[1] <- "ID"
+levels(RN_rst)[[1]] <- RN_rst_dbf
+
+PB_rst<-raster("a2_LOt_25_v170321.tif")
+PB_rst_dbf<-read.dbf("a2_LOt_25_v170321.tif.vat.dbf")
+colnames(PB_rst_dbf)[1] <- "ID"
+levels(PB_rst)[[1]] <- PB_rst_dbf
+
+PE_rst<-raster("a2_LOt_26_v170321.tif")
+PE_rst_dbf<-read.dbf("a2_LOt_26_v170321.tif.vat.dbf")
+colnames(PE_rst_dbf)[1] <- "ID"
+levels(PE_rst)[[1]] <- PE_rst_dbf
+
+AL_rst<-raster("a2_LOt_27_v170321.tif")
+AL_rst_dbf<-read.dbf("a2_LOt_27_v170321.tif.vat.dbf")
+colnames(AL_rst_dbf)[1] <- "ID"
+levels(AL_rst)[[1]] <- AL_rst_dbf
+plot(AL_rst)
+
+SE_rst<-raster("a2_LOt_28_v170321.tif")
+SE_rst_dbf<-read.dbf("a2_LOt_28_v170321.tif.vat.dbf")
+colnames(SE_rst_dbf)[1] <- "ID"
+levels(SE_rst)[[1]] <- SE_rst_dbf
+
+BA_rst<-raster("a2_LOt_29_v170321.tif")
+BA_rst_dbf<-read.dbf("a2_LOt_29_v170321.tif.vat.dbf")
+colnames(BA_rst_dbf)[1] <- "ID"
+levels(BA_rst)[[1]] <- BA_rst_dbf
+
+MG_rst<-raster("a2_LOt_31_v170321.tif")
+MG_rst_dbf<-read.dbf("a2_LOt_31_v170321.tif.vat.dbf")
+colnames(MG_rst_dbf)[1] <- "ID"
+levels(MG_rst)[[1]] <- MG_rst_dbf
+
+
+
+## calcula a area de vegetação em cada classe de uso dentro de cada propriedade particular ####
+##### MA, depois fazer estes passos para cada estado substituindo MA, por SE, AL, MG, PB, PE, RN, PI, MG, BA
+MA_PL<-MA_rst_dbf[MA_rst_dbf$pc_pl %in% c("PL","PL1") & MA_rst_dbf$plSize %in% c("S","M","L") ,]
+MA_PL_caat<-MA_PL[MA_PL$cd_mun %in% tab_muncaat$mun_codigo ,]
+MA_PL_caat$areaMF<-MA_PL_caat$areaHa/tab_muncaat$Mod_Fiscal.ha[match(MA_PL_caat$cd_mun,tab_muncaat$mun_codigo)]
+
+unique(tab_muncaat$mun_codigo[match(MA_PL_caat$cd_mun,tab_muncaat$mun_codigo)])
+MA_PL_caat$cd_mun[1:10]
+MA_PL_caat<-data.frame(MA_PL_caat,matrix(0,nr=nrow(MA_PL_caat),nc=4,dimnames=list(rownames(MA_PL_caat),c("X3","X4","X5","X12"))))
+
+MA_PL_caat<-read.table("MA_PPart_RL.txt",h=T)
+
+#### loop para calcular area de vegetacao dentro das propriedaes por estado, cada linha é uma propriedade privada com valores de vegetação em cada classes 
+# >>> tem que fazer todos os 10 estados e depois os anos de 2017 e 2008
+mun_cod_MA<-unique(tab_muncaat$mun_codigo[match(MA_PL_caat$cd_mun,tab_muncaat$mun_codigo)])
+
+for(i in mun_cod_MA[1:length(mun_cod_MA)]){
+  #  arregar o raster de uso do solo para cada município - fazer para os anos de 2017 e 2008
+  mun_rst<-raster(paste("D:/Adriana/OneDrive/Uso_solo_final",i,paste("mun_",i,"_usoFinal.asc",sep=""),sep="/"))
+  mun_MA_rst<-resample(MA_rst,mun_rst,"ngb")
+  mun_MA_rst[is.na(mun_rst)]<-NA
+  id_prop<-na.omit(unique(mun_MA_rst[]))
+  id_prop<-id_prop[id_prop %in% MA_PL_caat$ID]
+  
+  for(k in id_prop){
+    veg_vals<-table(mun_rst[mun_MA_rst[]==k])
+    veg_vals<-veg_vals[names(veg_vals) %in% c("3","4","5","12")] # classes de vegetação nativa
+    names(veg_vals)<-sapply(names(veg_vals),function(x) paste("X",x,collapse="",sep=""))
+    MA_PL_caat[MA_PL_caat$ID==k,names(veg_vals)]<-veg_vals
+    cat(paste("Propriedade N°",which(id_prop==k),"de",length(id_prop),"\n",sep=" "))
+  }
+  cat(paste("município N°", which(mun_cod_MA==i),"de",length(mun_cod_MA),"-",which(mun_cod_MA==i)/length(mun_cod_MA)*100,"%","\n",sep=" "))
+}
+
+# juntar todos os resultados dos estados
+
+PL_caat<-rbind((RN_PL_caat[,-19]),
+               (MA_PL_caat),
+               (PI_PL_caat),
+               (CE_PL_caat),
+               (AL_PL_caat),
+               (SE_PL_caat),
+               (MG_PL_caat),
+               (BA_PL_caat),
+               (PE_PL_caat),
+               (PB_PL_caat))
+
+### municipios com NAs (caíam foram da área de caatinga com classes de vegetação)
+mun_cod_NA<-municipios_caat$CD_GEOCMU[ is.na(municipios_caat$Balanco_RL)]
+UFs_NA<-municipios_caat$estado[municipios_caat$CD_GEOCMU%in%mun_cod_NA]
+
+NA_PL_caat<-rbind(PI_PL_caat,
+                  RN_PL_caat[,-c(19)],
+                  PB_PL_caat,
+                  PE_PL_caat,
+                  AL_PL_caat,
+                  MG_PL_caat)
+
+NA_PL_caat<-NA_PL_caat[NA_PL_caat$cd_mun %in% mun_cod_NA, ]
+
+for(i in mun_cod_NA[1:length(mun_cod_NA)]){
+  mun_rst<-raster(paste("D:/Adriana/OneDrive/Uso_solo_final",i,paste("mun_",i,"_usoFinal.asc",sep=""),sep="/"))
+  if(UFs_NA[which(mun_cod_NA==i)] == "PI")  mun_NA_rst<-resample(PI_rst,mun_rst,"ngb")
+  if(UFs_NA[which(mun_cod_NA==i)] == "RN")  mun_NA_rst<-resample(RN_rst,mun_rst,"ngb")
+  if(UFs_NA[which(mun_cod_NA==i)] == "PB")  mun_NA_rst<-resample(PB_rst,mun_rst,"ngb")
+  if(UFs_NA[which(mun_cod_NA==i)] == "PE")  mun_NA_rst<-resample(PE_rst,mun_rst,"ngb")
+  if(UFs_NA[which(mun_cod_NA==i)] == "AL")  mun_NA_rst<-resample(AL_rst,mun_rst,"ngb")
+  if(UFs_NA[which(mun_cod_NA==i)] == "MG")  mun_NA_rst<-resample(MG_rst,mun_rst,"ngb")
+  
+  mun_NA_rst[is.na(mun_rst)]<-NA
+  id_prop<-na.omit(unique(mun_NA_rst[]))
+  id_prop<-id_prop[id_prop %in% NA_PL_caat$ID]
+  
+  for(k in id_prop){
+    veg_vals<-table(mun_rst[mun_NA_rst[]==k])
+    veg_vals<-veg_vals[names(veg_vals) %in% c("3","4","5","12")]
+    names(veg_vals)<-sapply(names(veg_vals),function(x) paste("X",x,collapse="",sep=""))
+    NA_PL_caat[NA_PL_caat$ID==k,names(veg_vals)]<-veg_vals
+    cat(paste("Propriedade N°",which(id_prop==k),"de",length(id_prop),"\n",sep=" "))
+  }
+  cat(paste("município N°", which(mun_cod_NA==i),"de",length(mun_cod_NA),"-",which(mun_cod_NA==i)/length(mun_cod_NA)*100,"%","\n",sep=" "))
+}
+
+PL_caat<-PL_caat[!PL_caat$ID %in% NA_PL_caat$ID,]
+
+# atualizar o resultado final, juntando os municipios com NAs
+PL_caat<-rbind(PL_caat,NA_PL_caat)
+
+write.table(PL_caat,"PL_caat.txt")
